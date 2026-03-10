@@ -243,4 +243,75 @@ describe("Responsive Drawing Studio core UI", () => {
     expect(raw).toBeTruthy();
     expect(String(raw)).toMatch(/#3b82f6/i);
   });
+
+  test("keyboard shortcut: E toggles eraser and updates the canvas header mode text", async () => {
+    render(<App />);
+
+    // Initially brush mode is shown.
+    expect(screen.getByText(/Brush · 12px/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "e" });
+
+    // Now eraser mode is shown.
+    expect(await screen.findByText(/Eraser · 12px/i)).toBeInTheDocument();
+
+    // Toggle back.
+    fireEvent.keyDown(window, { key: "e" });
+    expect(await screen.findByText(/Brush · 12px/i)).toBeInTheDocument();
+  });
+
+  test("keyboard shortcut: Delete clears the canvas and announces status", async () => {
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.map((n) => n.textContent).join(" ")).toMatch(/Canvas cleared/i);
+  });
+
+  test("keyboard shortcut: Ctrl/Cmd+P exports PNG (intercepts print) and creates a download link", async () => {
+    const createElementSpy = jest.spyOn(document, "createElement");
+    let lastAnchor = null;
+
+    createElementSpy.mockImplementation((tagName) => {
+      if (tagName === "a") {
+        const a = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+        a.click = jest.fn();
+        lastAnchor = a;
+        return a;
+      }
+      return document.createElementNS("http://www.w3.org/1999/xhtml", tagName);
+    });
+
+    render(<App />);
+
+    fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(lastAnchor).not.toBeNull();
+      expect(lastAnchor.download).toMatch(/^drawing-2025-01-01T00-00-00\.000Z\.png$/);
+      expect(String(lastAnchor.href)).toMatch(/^blob:/);
+    });
+  });
+
+  test("keyboard shortcuts: [ and ] adjust brush size; 0 resets to 12", async () => {
+    render(<App />);
+
+    // Default is 12px.
+    expect(screen.getByLabelText(/Brush size 12px/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "]" });
+    expect(await screen.findByLabelText(/Brush size 13px/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "[" });
+    expect(await screen.findByLabelText(/Brush size 12px/i)).toBeInTheDocument();
+
+    // 0 reset
+    fireEvent.keyDown(window, { key: "]" });
+    fireEvent.keyDown(window, { key: "]" });
+    expect(await screen.findByLabelText(/Brush size 14px/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "0" });
+    expect(await screen.findByLabelText(/Brush size 12px/i)).toBeInTheDocument();
+  });
 });

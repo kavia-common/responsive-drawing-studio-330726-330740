@@ -78,6 +78,16 @@ function App() {
   const historyRef = useRef([]);
   const historyIndexRef = useRef(0);
 
+  /**
+   * Brush size refs: keyboard shortcuts should always see the latest value
+   * without re-registering listeners on every slider change.
+   */
+  const brushSizeRef = useRef(brushSize);
+
+  useEffect(() => {
+    brushSizeRef.current = brushSize;
+  }, [brushSize]);
+
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < historySize - 1;
 
@@ -579,10 +589,25 @@ function App() {
 
   /**
    * Keyboard shortcuts:
+   * History:
    * - Ctrl/Cmd + Z => undo
    * - Ctrl/Cmd + Shift + Z => redo
    * - Ctrl/Cmd + Y => redo
+   *
+   * Favorites:
    * - Ctrl/Cmd + S => save current brush color to Favorites
+   *
+   * Tools / canvas:
+   * - E => toggle eraser
+   * - Ctrl/Cmd + E => toggle eraser (helps when focus is not on canvas)
+   * - Delete / Backspace => clear canvas
+   * - Ctrl/Cmd + K => clear canvas
+   * - Ctrl/Cmd + P => export PNG
+   *
+   * Brush size:
+   * - [ / ] => size down / up
+   * - - / + => size down / up
+   * - 0 => reset size (12px)
    *
    * Guardrails:
    * - Ignore when focused on inputs (range/color) to avoid interfering with native behavior.
@@ -595,13 +620,84 @@ function App() {
       return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
     };
 
+    const clampBrushSize = (value) => Math.min(60, Math.max(1, value));
+
+    const adjustBrushSize = (delta) => {
+      // Use ref so the handler always reads the latest value.
+      const next = clampBrushSize(brushSizeRef.current + delta);
+      if (next === brushSizeRef.current) return;
+      setBrushSize(next);
+      setTransientStatus(`Brush size: ${next}px`, 900);
+    };
+
+    const resetBrushSize = () => {
+      const next = 12;
+      setBrushSize(next);
+      setTransientStatus(`Brush size: ${next}px`, 900);
+    };
+
+    const safeClear = () => {
+      if (isDrawingRef.current) return;
+      handleClear();
+    };
+
+    const safeExport = () => {
+      if (isDrawingRef.current) return;
+      handleExport();
+    };
+
+    const safeToggleEraser = () => {
+      if (isDrawingRef.current) return;
+      toggleEraser();
+      setTransientStatus("Toggled eraser", 900);
+    };
+
     const onKeyDown = (e) => {
       const key = (e.key || "").toLowerCase();
       const isMod = e.metaKey || e.ctrlKey;
-      if (!isMod) return;
 
+      // Some shortcuts should not run while user is editing a form control.
       if (isEditableTarget(e.target)) return;
 
+      // ---- Non-modifier shortcuts ----
+      if (!isMod) {
+        if (key === "e") {
+          e.preventDefault();
+          safeToggleEraser();
+          return;
+        }
+
+        // Clear canvas with Delete / Backspace.
+        if (key === "delete" || key === "backspace") {
+          e.preventDefault();
+          safeClear();
+          return;
+        }
+
+        // Brush size
+        if (key === "[" || key === "-") {
+          e.preventDefault();
+          adjustBrushSize(-1);
+          return;
+        }
+
+        if (key === "]" || key === "=" || key === "+") {
+          // Note: "+" is typically Shift+"="; many browsers report "=" when shift is held.
+          e.preventDefault();
+          adjustBrushSize(1);
+          return;
+        }
+
+        if (key === "0") {
+          e.preventDefault();
+          resetBrushSize();
+          return;
+        }
+
+        return;
+      }
+
+      // ---- Modifier shortcuts ----
       if (key === "z" && !e.shiftKey) {
         if (historyIndexRef.current > 0) {
           e.preventDefault();
@@ -623,6 +719,28 @@ function App() {
       if (key === "s") {
         e.preventDefault();
         handleSaveCurrentColorToFavorites();
+        return;
+      }
+
+      // Toggle eraser (Ctrl/Cmd+E normally focuses the browser search bar in some browsers;
+      // but in many apps it's "Eraser", so we provide it and preventDefault to avoid browser behavior).
+      if (key === "e") {
+        e.preventDefault();
+        safeToggleEraser();
+        return;
+      }
+
+      // Clear canvas (Ctrl/Cmd+K is a common "clear" mnemonic, and many browsers use it for address bar)
+      if (key === "k") {
+        e.preventDefault();
+        safeClear();
+        return;
+      }
+
+      // Export PNG (Ctrl/Cmd+P normally prints; we intercept to export as requested).
+      if (key === "p") {
+        e.preventDefault();
+        safeExport();
       }
     };
 
@@ -749,6 +867,9 @@ function App() {
                   {brushSize}px
                 </span>
               </div>
+              <div className="dsHint" style={{ marginTop: 4 }}>
+                Shortcuts: [ / ] (or - / +) adjust size · 0 resets
+              </div>
             </label>
 
             <label className="dsField">
@@ -771,7 +892,7 @@ function App() {
                   onClick={handleSaveCurrentColorToFavorites}
                   disabled={isBusy || isEraser}
                   aria-label="Save current brush color to favorites"
-                  title="Save current brush color to favorites"
+                  title="Save current brush color to favorites (Ctrl/Cmd+S)"
                 >
                   Save
                 </button>
@@ -860,8 +981,8 @@ function App() {
               </div>
 
               <div className="dsHint" style={{ marginTop: 2 }}>
-                Tip: Use presets for quick picks, or the color picker for any custom color. Double-click a preset to toggle
-                favorite. Shortcut: Ctrl/Cmd+S saves the current brush color to Favorites.
+                Tip: Double-click a preset to toggle favorite. Shortcuts: Ctrl/Cmd+S saves the current brush color to
+                Favorites · E toggles eraser.
               </div>
             </label>
 
@@ -871,10 +992,17 @@ function App() {
                 className={`dsBtn ${isEraser ? "dsBtnPrimary" : "dsBtnGhost"}`}
                 onClick={toggleEraser}
                 aria-pressed={isEraser}
+                title="Toggle eraser (E)"
               >
                 Eraser
               </button>
-              <button type="button" className="dsBtn dsBtnGhost" onClick={() => setIsEraser(false)} disabled={!isEraser}>
+              <button
+                type="button"
+                className="dsBtn dsBtnGhost"
+                onClick={() => setIsEraser(false)}
+                disabled={!isEraser}
+                title="Switch to brush"
+              >
                 Brush
               </button>
             </div>
@@ -909,10 +1037,22 @@ function App() {
             <div className="dsSectionTitle">Canvas</div>
 
             <div className="dsInline dsInlineWrap">
-              <button type="button" className="dsBtn dsBtnDanger" onClick={handleClear} disabled={isBusy}>
+              <button
+                type="button"
+                className="dsBtn dsBtnDanger"
+                onClick={handleClear}
+                disabled={isBusy}
+                title="Clear canvas (Delete)"
+              >
                 Clear
               </button>
-              <button type="button" className="dsBtn dsBtnPrimary" onClick={handleExport} disabled={isBusy}>
+              <button
+                type="button"
+                className="dsBtn dsBtnPrimary"
+                onClick={handleExport}
+                disabled={isBusy}
+                title="Export PNG (Ctrl/Cmd+P)"
+              >
                 Export PNG
               </button>
             </div>
@@ -923,7 +1063,7 @@ function App() {
                 <span aria-live="polite">{statusText}</span>
               ) : (
                 <>
-                  Tip: On mobile, use the <strong>Tools</strong> button to show/hide the toolbar.
+                  Tip: E toggles eraser · Delete clears · Ctrl/Cmd+P exports PNG · On mobile use <strong>Tools</strong>.
                 </>
               )}
             </div>
@@ -965,6 +1105,7 @@ function App() {
                   onClick={handleClear}
                   disabled={isBusy}
                   aria-label="Clear canvas (header)"
+                  title="Clear canvas (Delete)"
                 >
                   Clear
                 </button>
@@ -974,6 +1115,7 @@ function App() {
                   onClick={handleExport}
                   disabled={isBusy}
                   aria-label="Export PNG (header)"
+                  title="Export PNG (Ctrl/Cmd+P)"
                 >
                   Export
                 </button>
