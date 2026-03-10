@@ -126,6 +126,10 @@ describe("Responsive Drawing Studio core UI", () => {
     expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
 
+    // Custom palette actions exist.
+    expect(screen.getByRole("button", { name: /save current brush color to favorites/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /clear favorite colors/i })).toBeInTheDocument();
+
     // Ensure status region exists (even if empty initially).
     expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
   });
@@ -193,5 +197,33 @@ describe("Responsive Drawing Studio core UI", () => {
     // Status is set (either "Preparing PNG…" or "PNG downloaded").
     const statuses = screen.getAllByRole("status");
     expect(statuses.map((n) => n.textContent).join(" ")).toMatch(/Preparing PNG|PNG downloaded/);
+  });
+
+  test("custom palette: save favorite, persists to localStorage, and can remove", async () => {
+    const user = userEvent.setup();
+
+    // Start from a known storage state.
+    window.localStorage.clear();
+
+    render(<App />);
+
+    const saveBtn = screen.getByRole("button", { name: /save current brush color to favorites/i });
+
+    // Initial brush color is #3b82f6 (from App state). Save it.
+    await user.click(saveBtn);
+
+    // It should now appear in favorites as a button with the correct aria-label.
+    expect(screen.getByRole("button", { name: /set brush color to favorite #3b82f6/i })).toBeInTheDocument();
+
+    // localStorage should contain our palette key.
+    const raw = window.localStorage.getItem("drawingStudio.customPalette.v1");
+    expect(raw).toBeTruthy();
+    expect(String(raw)).toMatch(/#3b82f6/i);
+
+    // Remove it.
+    await user.click(screen.getByRole("button", { name: /remove #3b82f6 from favorites/i }));
+
+    // Favorite should no longer be present.
+    expect(screen.queryByRole("button", { name: /set brush color to favorite #3b82f6/i })).toBeNull();
   });
 });

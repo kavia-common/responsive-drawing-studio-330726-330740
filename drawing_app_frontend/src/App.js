@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import {
+  addColorToCustomPalette,
+  clearCustomPalette,
+  isColorInPalette,
+  loadCustomPalette,
+  normalizePaletteForUi,
+  removeColorFromCustomPalette,
+  saveCustomPalette,
+} from "./customPaletteStorage";
 
 /**
  * Responsive Drawing Studio
@@ -28,6 +37,17 @@ function App() {
 
   /** Minimal status/user feedback (kept simple; no toasts/deps). */
   const [statusText, setStatusText] = useState("");
+
+  /**
+   * Custom palette (favorite colors)
+   *
+   * Flow name: CustomPaletteFlow (App orchestration layer)
+   * Contract:
+   * - customPalette: string[] of normalized hex colors "#rrggbb" (lowercase), newest-first
+   * - Mutations go through named handlers (no ad-hoc localStorage access in JSX)
+   * - Persistence: localStorage via customPaletteStorage adapter, best-effort no-throw
+   */
+  const [customPalette, setCustomPalette] = useState(() => loadCustomPalette());
 
   /**
    * History UI state (derived from refs but kept in state so React can render disabled states).
@@ -377,6 +397,11 @@ function App() {
     };
   }, []);
 
+  // Persist custom palette changes (best-effort).
+  useEffect(() => {
+    saveCustomPalette(customPalette);
+  }, [customPalette]);
+
   /**
    * Initialize history with a "blank canvas" snapshot once the canvas is ready.
    * We commit after the first layout paint so canvas sizing effect has run.
@@ -513,6 +538,43 @@ function App() {
   const toggleEraser = () => {
     /** This is a public function. */
     setIsEraser((v) => !v);
+  };
+
+  // PUBLIC_INTERFACE
+  const handleSaveCurrentColorToFavorites = () => {
+    /** This is a public function. */
+    if (isEraser) {
+      setTransientStatus("Switch to Brush to save a color", 1600);
+      return;
+    }
+    setCustomPalette((curr) => addColorToCustomPalette(curr, brushColor));
+    setTransientStatus("Saved to favorites");
+  };
+
+  // PUBLIC_INTERFACE
+  const handleToggleFavoriteForColor = (color) => {
+    /** This is a public function. */
+    if (isEraser) setIsEraser(false);
+    setCustomPalette((curr) => {
+      const normalized = normalizePaletteForUi(curr);
+      if (isColorInPalette(normalized, color)) return removeColorFromCustomPalette(normalized, color);
+      return addColorToCustomPalette(normalized, color);
+    });
+  };
+
+  // PUBLIC_INTERFACE
+  const handleRemoveFavoriteColor = (color) => {
+    /** This is a public function. */
+    setCustomPalette((curr) => removeColorFromCustomPalette(curr, color));
+    setTransientStatus("Removed from favorites");
+  };
+
+  // PUBLIC_INTERFACE
+  const handleClearFavoriteColors = () => {
+    /** This is a public function. */
+    setCustomPalette([]);
+    clearCustomPalette();
+    setTransientStatus("Favorites cleared");
   };
 
   /**
@@ -693,11 +755,77 @@ function App() {
                 />
                 <span className="dsSwatch" style={{ background: activeColor }} aria-label="Active color swatch" />
                 <span className="dsHint">{isEraser ? "Eraser active" : brushColor.toUpperCase()}</span>
+
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnGhost"
+                  onClick={handleSaveCurrentColorToFavorites}
+                  disabled={isBusy || isEraser}
+                  aria-label="Save current brush color to favorites"
+                  title="Save current brush color to favorites"
+                >
+                  Save
+                </button>
               </div>
+
+              <div className="dsPaletteHeader">
+                <div className="dsPaletteTitle">Favorites</div>
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnDanger"
+                  onClick={handleClearFavoriteColors}
+                  disabled={isBusy || customPalette.length === 0}
+                  aria-label="Clear favorite colors"
+                  title="Clear favorites"
+                >
+                  Clear
+                </button>
+              </div>
+
+              {customPalette.length > 0 ? (
+                <div className="dsFavoriteRow" role="group" aria-label="Favorite colors">
+                  {customPalette.map((value) => {
+                    const isSelected = !isEraser && brushColor.toLowerCase() === value.toLowerCase();
+                    return (
+                      <div key={value} className="dsFavoriteItem">
+                        <button
+                          type="button"
+                          className={`dsPreset ${isSelected ? "isSelected" : ""}`}
+                          onClick={() => {
+                            setIsEraser(false);
+                            setBrushColor(value);
+                          }}
+                          title={`Use ${value.toUpperCase()}`}
+                          aria-label={`Set brush color to favorite ${value.toUpperCase()}`}
+                          aria-pressed={isSelected}
+                          disabled={isBusy}
+                        >
+                          <span className="dsPresetDot" style={{ background: value }} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="dsFavoriteRemove"
+                          onClick={() => handleRemoveFavoriteColor(value)}
+                          disabled={isBusy}
+                          aria-label={`Remove ${value.toUpperCase()} from favorites`}
+                          title="Remove"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="dsHint" style={{ marginTop: 6 }}>
+                  Save colors you like for quick reuse.
+                </div>
+              )}
 
               <div className="dsPresetRow" role="group" aria-label="Preset colors">
                 {presetColors.map((c) => {
                   const isSelected = !isEraser && brushColor.toLowerCase() === c.value.toLowerCase();
+                  const isFavorite = isColorInPalette(customPalette, c.value);
                   return (
                     <button
                       key={c.value}
@@ -708,7 +836,10 @@ function App() {
                         setIsEraser(false);
                         setBrushColor(c.value);
                       }}
-                      title={c.name}
+                      onDoubleClick={() => handleToggleFavoriteForColor(c.value)}
+                      title={`${c.name}${isFavorite ? " (favorite)" : ""} — double-click to ${
+                        isFavorite ? "remove from" : "add to"
+                      } favorites`}
                       aria-label={`Set brush color to ${c.name} (${c.value.toUpperCase()})`}
                       aria-pressed={isSelected}
                       disabled={isBusy}
@@ -720,7 +851,8 @@ function App() {
               </div>
 
               <div className="dsHint" style={{ marginTop: 2 }}>
-                Tip: Use presets for quick picks, or the color picker for any custom color.
+                Tip: Use presets for quick picks, or the color picker for any custom color. Double-click a preset to toggle
+                favorite.
               </div>
             </label>
 
