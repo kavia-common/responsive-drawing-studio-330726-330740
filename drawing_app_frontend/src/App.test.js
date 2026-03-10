@@ -1,8 +1,197 @@
-import { render, screen } from "@testing-library/react";
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import App from "./App";
 
-test("renders drawing studio header", () => {
-  render(<App />);
-  expect(screen.getByText(/Responsive Drawing Studio/i)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /tools/i })).toBeInTheDocument();
+function stubCanvas() {
+  // JSDOM doesn't implement canvas; stub the minimum used by App.
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: () => ({
+      // snapshot/restore + white background helpers
+      getImageData: () => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 }),
+      putImageData: () => undefined,
+      setTransform: () => undefined,
+      save: () => undefined,
+      restore: () => undefined,
+      clearRect: () => undefined,
+      fillRect: () => undefined,
+      drawImage: () => undefined,
+
+      // drawing ops
+      beginPath: () => undefined,
+      moveTo: () => undefined,
+      lineTo: () => undefined,
+      stroke: () => undefined,
+      arc: () => undefined,
+      fill: () => undefined,
+
+      // style props
+      globalCompositeOperation: "source-over",
+      strokeStyle: "#000",
+      fillStyle: "#fff",
+      lineCap: "round",
+      lineJoin: "round",
+      lineWidth: 1,
+    }),
+  });
+
+  Object.defineProperty(HTMLCanvasElement.prototype, "toBlob", {
+    configurable: true,
+    value: (cb) => cb(new Blob(["png"], { type: "image/png" })),
+  });
+
+  Object.defineProperty(HTMLCanvasElement.prototype, "toDataURL", {
+    configurable: true,
+    value: () => "data:image/png;base64,AAAA",
+  });
+
+  // Provide predictable measurements for layout-dependent code.
+  Object.defineProperty(HTMLCanvasElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      width: 500,
+      height: 400,
+      top: 0,
+      left: 0,
+      right: 500,
+      bottom: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
+
+  // Container sizing is based on its own bounding rect.
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: function getBoundingClientRect() {
+      // default; tests can override if needed
+      return {
+        width: 500,
+        height: 400,
+        top: 0,
+        left: 0,
+        right: 500,
+        bottom: 400,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+    },
+  });
+
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+
+  // matchMedia is used for responsive toolbar default.
+  window.matchMedia =
+    window.matchMedia ||
+    (() => ({
+      matches: false,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+    }));
+
+  // In tests we want a stable timestamp for export filename.
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date("2025-01-01T00:00:00.000Z"));
+}
+
+describe("Responsive Drawing Studio core UI", () => {
+  beforeEach(() => {
+    stubCanvas();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  test("renders primary UI landmarks and accessible controls", async () => {
+    render(<App />);
+
+    expect(screen.getByText(/Responsive Drawing Studio/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /tools/i })).toBeInTheDocument();
+
+    // Canvas is discoverable by aria-label.
+    expect(screen.getByLabelText(/drawing canvas/i)).toBeInTheDocument();
+
+    // Toolbar controls are accessible via labels.
+    expect(screen.getByLabelText(/brush size/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/brush color/i)).toBeInTheDocument();
+
+    // Ensure status region exists (even if empty initially).
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
+  });
+
+  test("undo/redo are disabled initially, then enable after a stroke; redo enables after undo", async () => {
+    render(<App />);
+
+    const undoButtons = screen.getAllByRole("button", { name: /^undo/i });
+    const redoButtons = screen.getAllByRole("button", { name: /^redo/i });
+
+    // Initially, history has only the blank snapshot => cannot undo/redo.
+    undoButtons.forEach((btn) => expect(btn).toBeDisabled());
+    redoButtons.forEach((btn) => expect(btn).toBeDisabled());
+
+    const canvas = screen.getByLabelText(/drawing canvas/i);
+
+    // Draw a stroke (down + up triggers commitHistorySnapshot).
+    fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 10, clientY: 10, button: 0 });
+    fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 20, clientY: 20 });
+
+    // After a stroke, undo should enable and redo remain disabled.
+    await waitFor(() => undoButtons.forEach((btn) => expect(btn).not.toBeDisabled()));
+    redoButtons.forEach((btn) => expect(btn).toBeDisabled());
+
+    // Click one of the undo buttons; redo should enable.
+    await userEvent.click(undoButtons[0]);
+    await waitFor(() => redoButtons.forEach((btn) => expect(btn).not.toBeDisabled()));
+  });
+
+  test("export wiring creates a downloadable link and announces status", async () => {
+    const createElementSpy = jest.spyOn(document, "createElement");
+    const appendSpy = jest.spyOn(document.body, "appendChild");
+    const removeSpy = jest.spyOn(document.body, "removeChild");
+
+    // Intercept the anchor that downloadBlob creates.
+    let lastAnchor = null;
+    createElementSpy.mockImplementation((tagName) => {
+      if (tagName === "a") {
+        const a = document.createElementNS("http://www.w3.org/1999/xhtml", "a");
+        a.click = jest.fn();
+        lastAnchor = a;
+        return a;
+      }
+      return document.createElementNS("http://www.w3.org/1999/xhtml", tagName);
+    });
+
+    render(<App />);
+
+    // Use the toolbar button (unambiguous label).
+    await userEvent.click(screen.getByRole("button", { name: /export png/i }));
+
+    await waitFor(() => {
+      expect(lastAnchor).not.toBeNull();
+      expect(lastAnchor.download).toMatch(/^drawing-2025-01-01T00-00-00\.000Z\.png$/);
+      // href should be a blob URL (from URL.createObjectURL)
+      expect(String(lastAnchor.href)).toMatch(/^blob:/);
+      expect(lastAnchor.click).toHaveBeenCalledTimes(1);
+    });
+
+    // Cleanup called (anchor add/remove).
+    expect(appendSpy).toHaveBeenCalled();
+    expect(removeSpy).toHaveBeenCalled();
+
+    // Status is set (either "Preparing PNG…" or "PNG downloaded").
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.map((n) => n.textContent).join(" ")).toMatch(/Preparing PNG|PNG downloaded/);
+  });
 });

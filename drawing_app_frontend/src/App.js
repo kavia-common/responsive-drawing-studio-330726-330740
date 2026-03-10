@@ -734,16 +734,40 @@ function App() {
               </div>
 
               <div className="dsCanvasHeaderRight">
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleUndo} disabled={!canUndo || isBusy}>
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnGhost"
+                  onClick={handleUndo}
+                  disabled={!canUndo || isBusy}
+                  aria-label="Undo (header)"
+                >
                   Undo
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleRedo} disabled={!canRedo || isBusy}>
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnGhost"
+                  onClick={handleRedo}
+                  disabled={!canRedo || isBusy}
+                  aria-label="Redo (header)"
+                >
                   Redo
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleClear} disabled={isBusy}>
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnGhost"
+                  onClick={handleClear}
+                  disabled={isBusy}
+                  aria-label="Clear canvas (header)"
+                >
                   Clear
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnPrimary" onClick={handleExport} disabled={isBusy}>
+                <button
+                  type="button"
+                  className="dsBtn dsBtnSmall dsBtnPrimary"
+                  onClick={handleExport}
+                  disabled={isBusy}
+                  aria-label="Export PNG (header)"
+                >
                   Export
                 </button>
               </div>
@@ -761,6 +785,10 @@ function App() {
                 onPointerCancel={endStroke}
                 onPointerLeave={endStroke}
               />
+              {/* Screen-reader-only live region so status updates are announced consistently */}
+              <div className="dsSrOnly" role="status" aria-live="polite">
+                {statusText}
+              </div>
             </div>
           </div>
         </main>
