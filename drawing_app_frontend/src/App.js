@@ -582,6 +582,7 @@ function App() {
    * - Ctrl/Cmd + Z => undo
    * - Ctrl/Cmd + Shift + Z => redo
    * - Ctrl/Cmd + Y => redo
+   * - Ctrl/Cmd + S => save current brush color to Favorites
    *
    * Guardrails:
    * - Ignore when focused on inputs (range/color) to avoid interfering with native behavior.
@@ -614,6 +615,14 @@ function App() {
           e.preventDefault();
           handleRedo();
         }
+        return;
+      }
+
+      // Save current brush color to Favorites.
+      // We preventDefault so the browser doesn't trigger "Save page" dialog.
+      if (key === "s") {
+        e.preventDefault();
+        handleSaveCurrentColorToFavorites();
       }
     };
 
@@ -852,7 +861,7 @@ function App() {
 
               <div className="dsHint" style={{ marginTop: 2 }}>
                 Tip: Use presets for quick picks, or the color picker for any custom color. Double-click a preset to toggle
-                favorite.
+                favorite. Shortcut: Ctrl/Cmd+S saves the current brush color to Favorites.
               </div>
             </label>
 

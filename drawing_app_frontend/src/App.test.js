@@ -226,4 +226,21 @@ describe("Responsive Drawing Studio core UI", () => {
     // Favorite should no longer be present.
     expect(screen.queryByRole("button", { name: /set brush color to favorite #3b82f6/i })).toBeNull();
   });
+
+  test("keyboard shortcut: Ctrl/Cmd+S saves current brush color to favorites", async () => {
+    render(<App />);
+
+    // Start from a known storage state.
+    window.localStorage.clear();
+
+    // Trigger the shortcut. (Ctrl+S on Windows/Linux; Cmd+S on macOS)
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    // Favorites should now include the default brush color (#3b82f6).
+    expect(await screen.findByRole("button", { name: /set brush color to favorite #3b82f6/i })).toBeInTheDocument();
+
+    const raw = window.localStorage.getItem("drawingStudio.customPalette.v1");
+    expect(raw).toBeTruthy();
+    expect(String(raw)).toMatch(/#3b82f6/i);
+  });
 });
