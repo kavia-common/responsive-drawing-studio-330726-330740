@@ -4,13 +4,17 @@ import "./App.css";
 /**
  * Responsive Drawing Studio
  *
- * Step 01.02 scope:
- * - Actual freehand drawing on canvas using Pointer Events
- * - Brush size, color, and eraser mode
- * - Correct coordinate mapping on resize + device pixel ratio handling
- * - Toolbar controls wired to affect drawing behavior
+ * Step 01.03 scope:
+ * - Add undo/redo history for the canvas drawing
+ * - Wire undo/redo buttons with correct disabled states
+ * - Add keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z and/or Ctrl/Cmd+Y (redo)
  *
- * Note: Real undo/redo history is implemented in later steps.
+ * Implementation notes:
+ * - History stores ImageData snapshots in *device pixel* space (canvas.width/height).
+ * - A snapshot is committed at the end of each stroke (pointer up/cancel/leave),
+ *   and when clearing the canvas.
+ * - When undoing/redoing, we restore ImageData and then fill white behind pixels
+ *   (destination-over) so export is consistently white-background.
  */
 
 // PUBLIC_INTERFACE
@@ -20,12 +24,15 @@ function App() {
   const [brushColor, setBrushColor] = useState("#3b82f6");
   const [isEraser, setIsEraser] = useState(false);
 
-  /** History counters as placeholders until real history is implemented */
-  const [historyIndex, setHistoryIndex] = useState(0);
-  const [historySize, setHistorySize] = useState(0);
-
   /** Responsive toolbar */
   const [toolbarOpen, setToolbarOpen] = useState(true);
+
+  /**
+   * History UI state (derived from refs but kept in state so React can render disabled states).
+   * historyIndex is the index of the "current" snapshot within historyRef.current.
+   */
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [historySize, setHistorySize] = useState(0);
 
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -38,10 +45,115 @@ function App() {
   /** Used for resizing while preserving existing pixels. */
   const snapshotRef = useRef(null);
 
+  /**
+   * History model:
+   * - historyRef: array of { imageData, width, height }
+   * - historyIndexRef: current index into the array
+   *
+   * We keep the canonical model in refs so keyboard handlers can access
+   * the latest values without depending on state closures.
+   */
+  const historyRef = useRef([]);
+  const historyIndexRef = useRef(0);
+
   const canUndo = historyIndex > 0;
-  const canRedo = historyIndex < historySize;
+  const canRedo = historyIndex < historySize - 1;
 
   const activeColor = useMemo(() => (isEraser ? "#ffffff" : brushColor), [isEraser, brushColor]);
+
+  /**
+   * Fill behind existing pixels: destination-over only affects transparent pixels.
+   * We use this after restores/resize to keep background white for export.
+   */
+  const ensureBackgroundWhite = (ctx, cssWidth, cssHeight) => {
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    ctx.restore();
+  };
+
+  /**
+   * Create a snapshot in device pixel space (canvas.width/height).
+   * Returns null if canvas/ctx not available.
+   */
+  const snapshotCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    try {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      return { imageData, width: canvas.width, height: canvas.height };
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Push a new snapshot onto the history stack.
+   * - If we are not at the end, truncate redo states.
+   * - Avoid pushing duplicates (cheap pixel-by-pixel check is expensive),
+   *   so we accept an "always push" policy on stroke end; for safety we
+   *   skip if snapshot fails.
+   */
+  const commitHistorySnapshot = () => {
+    const snap = snapshotCanvas();
+    if (!snap) return;
+
+    const nextHistory = historyRef.current.slice(0, historyIndexRef.current + 1);
+    nextHistory.push(snap);
+
+    historyRef.current = nextHistory;
+    historyIndexRef.current = nextHistory.length - 1;
+
+    setHistorySize(nextHistory.length);
+    setHistoryIndex(historyIndexRef.current);
+  };
+
+  /**
+   * Restore a snapshot into the canvas.
+   * Important: putImageData works in device pixels, and will overwrite all pixels.
+   * After restoring, we re-apply CSS coordinate transform and fill white behind.
+   */
+  const restoreHistorySnapshot = (snap) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !snap) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // If snapshot dimensions differ (e.g., after big resize), scale it into the current canvas.
+    if (snap.width !== canvas.width || snap.height !== canvas.height) {
+      const temp = document.createElement("canvas");
+      temp.width = snap.width;
+      temp.height = snap.height;
+      const tctx = temp.getContext("2d");
+      if (!tctx) return;
+      tctx.putImageData(snap.imageData, 0, 0);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(temp, 0, 0, snap.width, snap.height, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.putImageData(snap.imageData, 0, 0);
+      ctx.restore();
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = Math.max(1, Math.floor(rect.width));
+    const cssHeight = Math.max(1, Math.floor(rect.height));
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ensureBackgroundWhite(ctx, cssWidth, cssHeight);
+  };
 
   /**
    * Translate a PointerEvent's client coordinates into CSS pixel coordinates
@@ -122,15 +234,6 @@ function App() {
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const ensureBackgroundWhite = (ctx, cssWidth, cssHeight) => {
-      // Fill behind existing pixels: destination-over only affects transparent pixels.
-      ctx.save();
-      ctx.globalCompositeOperation = "destination-over";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, cssWidth, cssHeight);
-      ctx.restore();
-    };
-
     const snapshot = () => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return null;
@@ -192,6 +295,12 @@ function App() {
           restoreSnapshot(snapshotRef.current, dpr, cssWidth, cssHeight);
           snapshotRef.current = null;
         }
+
+        /**
+         * Important: resizing changes the canvas bitmap size; our stored history snapshots
+         * are scaled on restore, so we don't need to rewrite the entire history here.
+         * (We keep history snapshots in their original device pixel size.)
+         */
       } else {
         // Keep CSS size synced even if device pixels unchanged.
         canvas.style.width = `${cssWidth}px`;
@@ -232,6 +341,20 @@ function App() {
     };
   }, []);
 
+  /**
+   * Initialize history with a "blank canvas" snapshot once the canvas is ready.
+   * We commit after the first layout paint so canvas sizing effect has run.
+   */
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      // Only initialize once
+      if (historyRef.current.length > 0) return;
+      commitHistorySnapshot();
+    });
+    return () => window.cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // PUBLIC_INTERFACE
   const handleClear = () => {
     const canvas = canvasRef.current;
@@ -252,9 +375,7 @@ function App() {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
-    // Placeholder: reset history until real implementation.
-    setHistoryIndex(0);
-    setHistorySize(0);
+    commitHistorySnapshot();
   };
 
   // PUBLIC_INTERFACE
@@ -274,14 +395,28 @@ function App() {
 
   // PUBLIC_INTERFACE
   const handleUndo = () => {
-    // Placeholder until real drawing history exists.
-    setHistoryIndex((v) => Math.max(0, v - 1));
+    if (historyIndexRef.current <= 0) return;
+    const nextIndex = historyIndexRef.current - 1;
+    historyIndexRef.current = nextIndex;
+
+    const snap = historyRef.current[nextIndex];
+    restoreHistorySnapshot(snap);
+
+    setHistoryIndex(nextIndex);
+    setHistorySize(historyRef.current.length);
   };
 
   // PUBLIC_INTERFACE
   const handleRedo = () => {
-    // Placeholder until real drawing history exists.
-    setHistoryIndex((v) => Math.min(historySize, v + 1));
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    const nextIndex = historyIndexRef.current + 1;
+    historyIndexRef.current = nextIndex;
+
+    const snap = historyRef.current[nextIndex];
+    restoreHistorySnapshot(snap);
+
+    setHistoryIndex(nextIndex);
+    setHistorySize(historyRef.current.length);
   };
 
   // PUBLIC_INTERFACE
@@ -290,9 +425,57 @@ function App() {
   };
 
   /**
+   * Keyboard shortcuts:
+   * - Ctrl/Cmd + Z => undo
+   * - Ctrl/Cmd + Shift + Z => redo
+   * - Ctrl/Cmd + Y => redo
+   *
+   * Guardrails:
+   * - Ignore when focused on inputs (range/color) to avoid interfering with native behavior.
+   */
+  useEffect(() => {
+    const isEditableTarget = (target) => {
+      if (!target) return false;
+      const tag = target.tagName?.toLowerCase?.();
+      if (!tag) return false;
+      return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+    };
+
+    const onKeyDown = (e) => {
+      const key = (e.key || "").toLowerCase();
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod) return;
+
+      if (isEditableTarget(e.target)) return;
+
+      // Undo: Mod+Z (without Shift)
+      if (key === "z" && !e.shiftKey) {
+        if (historyIndexRef.current > 0) {
+          e.preventDefault();
+          handleUndo();
+        }
+        return;
+      }
+
+      // Redo: Mod+Shift+Z OR Mod+Y
+      if ((key === "z" && e.shiftKey) || key === "y") {
+        if (historyIndexRef.current < historyRef.current.length - 1) {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, { passive: false });
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
    * Pointer handlers:
    * - Capture pointer so drawing continues if pointer leaves the canvas bounds.
    * - Single active pointer id (ignore extra touches).
+   * - Commit history on stroke end.
    */
   const handlePointerDown = (e) => {
     if (e.button != null && e.button !== 0) return; // only primary button for mouse
@@ -342,6 +525,8 @@ function App() {
   const endStroke = (e) => {
     if (activePointerIdRef.current != null && e.pointerId !== activePointerIdRef.current) return;
 
+    const wasDrawing = isDrawingRef.current;
+
     isDrawingRef.current = false;
     lastPointRef.current = null;
 
@@ -354,6 +539,12 @@ function App() {
       }
     }
     activePointerIdRef.current = null;
+
+    // Commit a snapshot only if we were actually drawing.
+    if (wasDrawing) {
+      commitHistorySnapshot();
+    }
+
     e.preventDefault();
   };
 
@@ -452,7 +643,10 @@ function App() {
 
             <div className="dsMeta">
               <span className="dsMetaDot" aria-hidden="true" />
-              History (placeholder): {historyIndex}/{historySize}
+              History: {Math.min(historyIndex + 1, Math.max(historySize, 1))}/{Math.max(historySize, 1)}
+              <span className="dsHint" style={{ marginLeft: 8 }}>
+                (Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z)
+              </span>
             </div>
           </div>
 
@@ -487,6 +681,12 @@ function App() {
               </div>
 
               <div className="dsCanvasHeaderRight">
+                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleUndo} disabled={!canUndo}>
+                  Undo
+                </button>
+                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleRedo} disabled={!canRedo}>
+                  Redo
+                </button>
                 <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleClear}>
                   Clear
                 </button>
