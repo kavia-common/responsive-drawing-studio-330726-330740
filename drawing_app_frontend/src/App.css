@@ -1,104 +1,498 @@
-/* CSS Variables for Theme Management */
+/* Drawing Studio - Modern Light Theme
+   Accents: #3b82f6 (primary) / #06b6d4 (success)
+*/
+
 :root {
-  /* Light theme colors */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --text-primary: #282c34;
-  --text-secondary: #61dafb;
-  --border-color: #e9ecef;
-  --button-bg: #007bff;
-  --button-text: #ffffff;
+  --ds-bg: #f9fafb;
+  --ds-surface: #ffffff;
+  --ds-surface-2: #f3f4f6;
+  --ds-border: rgba(17, 24, 39, 0.10);
+  --ds-text: #111827;
+  --ds-text-2: rgba(17, 24, 39, 0.70);
+
+  --ds-primary: #3b82f6;
+  --ds-success: #06b6d4;
+  --ds-danger: #ef4444;
+
+  --ds-shadow-sm: 0 1px 2px rgba(17, 24, 39, 0.06);
+  --ds-shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
+
+  --ds-radius: 16px;
+  --ds-radius-sm: 12px;
+
+  --ds-focus: 0 0 0 4px rgba(59, 130, 246, 0.20);
+
+  --ds-font: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
 }
 
-[data-theme="dark"] {
-  /* Dark theme colors */
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #282c34;
-  --text-primary: #ffffff;
-  --text-secondary: #61dafb;
-  --border-color: #404040;
-  --button-bg: #0056b3;
-  --button-text: #ffffff;
+* {
+  box-sizing: border-box;
 }
 
-.App {
-  text-align: center;
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  min-height: 100vh;
-  transition: background-color 0.3s ease, color 0.3s ease;
+html,
+body,
+#root {
+  height: 100%;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+body {
+  margin: 0;
+  font-family: var(--ds-font);
+  color: var(--ds-text);
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(59, 130, 246, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 90% 10%, rgba(6, 182, 212, 0.08), transparent 55%),
+    var(--ds-bg);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: var(--bg-secondary);
+/* App layout */
+.dsApp {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+.dsTopbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 12px;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: var(--text-primary);
-  transition: background-color 0.3s ease;
-  position: relative;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(249, 250, 251, 0.70);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--ds-border);
 }
 
-.App-link {
-  color: var(--text-secondary);
-  transition: color 0.3s ease;
+.dsBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.theme-toggle {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background-color: var(--button-bg);
-  color: var(--button-text);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 20px;
+.dsBrandMark {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 1), rgba(6, 182, 212, 1));
+  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.20);
+}
+
+.dsBrandText {
+  min-width: 0;
+}
+
+.dsTitle {
   font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.1;
 }
 
-.theme-toggle:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+.dsSubtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ds-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsToolbarToggle {
+  appearance: none;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+  border-radius: 999px;
+  padding: 9px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: var(--ds-shadow-sm);
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.dsToolbarToggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(17, 24, 39, 0.08);
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.dsToolbarToggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-shadow-sm), var(--ds-focus);
+}
+
+.dsToolbarToggleIcon {
+  font-size: 14px;
   opacity: 0.9;
 }
 
-.theme-toggle:active {
-  transform: translateY(0);
+.dsMain {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  padding: 16px;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
+/* Toolbar */
+.dsToolbar {
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--ds-shadow);
+  padding: 14px;
+  height: fit-content;
+  position: sticky;
+  top: 72px; /* below topbar */
+}
+
+.dsToolbarSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dsSectionTitle {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(17, 24, 39, 0.65);
+}
+
+.dsToolbarDivider {
+  height: 1px;
+  background: var(--ds-border);
+  margin: 14px 0;
+}
+
+.dsField {
+  display: grid;
+  gap: 6px;
+}
+
+.dsLabel {
+  font-size: 12px;
+  color: var(--ds-text-2);
+  font-weight: 600;
+}
+
+.dsInline {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.dsInlineWrap {
+  flex-wrap: wrap;
+}
+
+.dsRange {
+  width: 100%;
+  accent-color: var(--ds-primary);
+}
+
+.dsPill {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.75);
+  background: rgba(59, 130, 246, 0.10);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  padding: 6px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.dsColor {
+  width: 44px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--ds-border);
+  border-radius: 10px;
+  background: var(--ds-surface);
+  cursor: pointer;
+}
+
+.dsColor:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dsSwatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(17, 24, 39, 0.18);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+}
+
+.dsHint {
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.60);
+  font-weight: 600;
+}
+
+.dsMeta {
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.62);
+  line-height: 1.35;
+}
+
+.dsMetaDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--ds-primary), var(--ds-success));
+  margin-right: 8px;
+  transform: translateY(-1px);
+}
+
+/* Buttons */
+.dsBtn {
+  appearance: none;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease, opacity 120ms ease;
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.dsBtn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.25);
+  box-shadow: 0 10px 20px rgba(17, 24, 39, 0.08);
+}
+
+.dsBtn:active {
+  transform: translateY(0px);
+}
+
+.dsBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-shadow-sm), var(--ds-focus);
+}
+
+.dsBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.dsBtnPrimary {
+  border-color: rgba(59, 130, 246, 0.30);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 1), rgba(6, 182, 212, 1));
+  color: #ffffff;
+}
+
+.dsBtnPrimary:hover {
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+.dsBtnGhost {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.dsBtnDanger {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.10);
+  color: #991b1b;
+}
+
+.dsBtnSmall {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+/* Canvas pane */
+.dsCanvasPane {
+  min-width: 0;
+}
+
+.dsCanvasFrame {
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+  background: rgba(255, 255, 255, 0.80);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--ds-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 72px - 32px - 44px); /* approx: topbar + paddings + footer */
+}
+
+.dsCanvasHeader {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ds-border);
+  background: linear-gradient(180deg, rgba(249, 250, 251, 0.75), rgba(255, 255, 255, 0.55));
+}
+
+.dsCanvasHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dsBadge {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.10);
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  color: rgba(17, 24, 39, 0.75);
+}
+
+.dsCanvasSpec {
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.60);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsCanvasHeaderRight {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.dsCanvasContainer {
+  position: relative;
+  flex: 1;
+  min-height: 420px;
+  background: #ffffff;
+}
+
+.dsCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* important for later pointer drawing on mobile */
+}
+
+.dsCanvasOverlay {
+  position: absolute;
+  inset: 18px;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
+.dsOverlayCard {
+  max-width: 420px;
+  border-radius: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  background: rgba(59, 130, 246, 0.06);
+  padding: 12px 12px;
+  box-shadow: 0 10px 25px rgba(17, 24, 39, 0.08);
+}
+
+.dsOverlayTitle {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 24, 39, 0.65);
+}
+
+.dsOverlayText {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.70);
+  line-height: 1.3;
+}
+
+/* Footer */
+.dsFooter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 16px 18px;
+  color: rgba(17, 24, 39, 0.55);
+  font-size: 12px;
+}
+
+.dsFooterDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--ds-primary), var(--ds-success));
+}
+
+/* Responsive behavior:
+   - Toolbar becomes collapsible drawer on small screens.
+*/
+@media (max-width: 1024px) {
+  .dsMain {
+    grid-template-columns: 300px 1fr;
   }
 }
 
-/* Responsive design for mobile */
 @media (max-width: 768px) {
-  .theme-toggle {
-    top: 10px;
-    right: 10px;
-    padding: 8px 16px;
-    font-size: 12px;
+  .dsMain {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .dsToolbar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 64px;
+    z-index: 50;
+    height: auto;
+    max-height: calc(100vh - 92px);
+    overflow: auto;
+    transform-origin: top;
+    transition: transform 180ms ease, opacity 180ms ease;
+  }
+
+  .dsToolbar.isClosed {
+    transform: translateY(-10px) scale(0.98);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .dsToolbar.isOpen {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .dsCanvasFrame {
+    min-height: calc(100vh - 72px - 24px - 48px);
+  }
+
+  .dsCanvasOverlay {
+    inset: 12px;
   }
 }
