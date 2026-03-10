@@ -2,15 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 /**
- * Responsive Drawing Studio - Baseline UI
+ * Responsive Drawing Studio
  *
- * Step 01.01 scope:
- * - Replace placeholder App with a responsive layout: toolbar + central canvas
- * - Provide UI controls: brush size, color picker, eraser, undo/redo, clear, export
- * - Implement mobile-collapsible toolbar behavior
- * - Implement export (PNG download) and clear (visual clear) as baseline interactions
+ * Step 01.02 scope:
+ * - Actual freehand drawing on canvas using Pointer Events
+ * - Brush size, color, and eraser mode
+ * - Correct coordinate mapping on resize + device pixel ratio handling
+ * - Toolbar controls wired to affect drawing behavior
  *
- * Note: Full drawing interactions + real undo/redo stacks are implemented in later steps.
+ * Note: Real undo/redo history is implemented in later steps.
  */
 
 // PUBLIC_INTERFACE
@@ -30,16 +30,142 @@ function App() {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
+  /** Drawing state kept in refs to avoid re-rendering on every pointer move. */
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef(null);
+  const activePointerIdRef = useRef(null);
+
+  /** Used for resizing while preserving existing pixels. */
+  const snapshotRef = useRef(null);
+
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < historySize;
 
   const activeColor = useMemo(() => (isEraser ? "#ffffff" : brushColor), [isEraser, brushColor]);
 
-  // Keep a crisp canvas in the available container space.
+  /**
+   * Translate a PointerEvent's client coordinates into CSS pixel coordinates
+   * within the canvas. This stays correct even if canvas is scaled via CSS.
+   */
+  const getCanvasPointFromEvent = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Clamp to canvas bounds to avoid odd strokes outside.
+    const clampedX = Math.min(Math.max(0, x), rect.width);
+    const clampedY = Math.min(Math.max(0, y), rect.height);
+    return { x: clampedX, y: clampedY };
+  };
+
+  /**
+   * Configure stroke style for the current mode.
+   * For erasing we use `destination-out` so it truly erases (reveals white bg).
+   */
+  const applyStrokeStyle = (ctx) => {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = brushSize;
+
+    if (isEraser) {
+      // Erase by clearing pixels rather than painting white; background remains white.
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.strokeStyle = "rgba(0,0,0,1)";
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = brushColor;
+    }
+  };
+
+  /**
+   * Draw a line segment in CSS pixel space.
+   * Canvas context is scaled to CSS pixels via ctx.setTransform(dpr,0,0,dpr,0,0),
+   * so we can draw using CSS coordinates directly.
+   */
+  const drawSegment = (from, to) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.save();
+    applyStrokeStyle(ctx);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  /** Paint a single dot (for taps/clicks without movement). */
+  const drawDot = (at) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.save();
+    applyStrokeStyle(ctx);
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, Math.max(0.5, brushSize / 2), 0, Math.PI * 2);
+    ctx.fillStyle = isEraser ? "rgba(0,0,0,1)" : brushColor;
+    // For eraser, composite operation is destination-out so fill clears pixels.
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // Keep a crisp canvas in the available container space (DPR aware) and preserve content on resize.
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
+
+    const ensureBackgroundWhite = (ctx, cssWidth, cssHeight) => {
+      // Fill behind existing pixels: destination-over only affects transparent pixels.
+      ctx.save();
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
+      ctx.restore();
+    };
+
+    const snapshot = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      try {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return { imageData, width: canvas.width, height: canvas.height };
+      } catch {
+        // Some environments may throw (e.g., tainted canvas). Not expected here.
+        return null;
+      }
+    };
+
+    const restoreSnapshot = (snap, dpr, cssWidth, cssHeight) => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx || !snap) return;
+
+      // Draw old bitmap scaled into the new canvas (in device pixels).
+      const temp = document.createElement("canvas");
+      temp.width = snap.width;
+      temp.height = snap.height;
+      const tctx = temp.getContext("2d");
+      if (!tctx) return;
+      tctx.putImageData(snap.imageData, 0, 0);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // work in device pixels for drawImage
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(temp, 0, 0, snap.width, snap.height, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      // Re-apply CSS coordinate transform and ensure white background.
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ensureBackgroundWhite(ctx, cssWidth, cssHeight);
+    };
 
     const resize = () => {
       const rect = container.getBoundingClientRect();
@@ -47,20 +173,33 @@ function App() {
       const cssHeight = Math.max(1, Math.floor(rect.height));
 
       const dpr = window.devicePixelRatio || 1;
+      const nextW = Math.floor(cssWidth * dpr);
+      const nextH = Math.floor(cssHeight * dpr);
 
-      // Only resize if needed to avoid clearing content too often (later: preserve drawings).
-      if (canvas.width !== Math.floor(cssWidth * dpr) || canvas.height !== Math.floor(cssHeight * dpr)) {
+      // Snapshot before resizing (resizing clears the canvas).
+      const needsResize = canvas.width !== nextW || canvas.height !== nextH;
+      if (needsResize) {
+        snapshotRef.current = snapshot();
         canvas.style.width = `${cssWidth}px`;
         canvas.style.height = `${cssHeight}px`;
-        canvas.width = Math.floor(cssWidth * dpr);
-        canvas.height = Math.floor(cssHeight * dpr);
+        canvas.width = nextW;
+        canvas.height = nextH;
 
         const ctx = canvas.getContext("2d");
         if (ctx) {
+          // Map drawing coordinates to CSS pixels.
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          // Baseline: fill with white so export background is not transparent.
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(0, 0, cssWidth, cssHeight);
+          restoreSnapshot(snapshotRef.current, dpr, cssWidth, cssHeight);
+          snapshotRef.current = null;
+        }
+      } else {
+        // Keep CSS size synced even if device pixels unchanged.
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ensureBackgroundWhite(ctx, cssWidth, cssHeight);
         }
       }
     };
@@ -75,7 +214,7 @@ function App() {
       ro.disconnect();
       window.removeEventListener("resize", resize);
     };
-  }, []);
+  }, [brushColor, brushSize, isEraser]);
 
   // Mobile behavior: default to collapsed toolbar on small screens, open on larger screens.
   useEffect(() => {
@@ -100,13 +239,14 @@ function App() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const cssWidth = Math.floor(canvas.getBoundingClientRect().width);
-    const cssHeight = Math.floor(canvas.getBoundingClientRect().height);
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = Math.floor(rect.width);
+    const cssHeight = Math.floor(rect.height);
 
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset in case transforms exist later
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.restore();
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     // Fill white so export looks clean.
     ctx.fillStyle = "#ffffff";
@@ -122,7 +262,7 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Export as PNG. Canvas is already filled white in baseline.
+    // Export as PNG. Background is filled white.
     const dataUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = dataUrl;
@@ -147,6 +287,74 @@ function App() {
   // PUBLIC_INTERFACE
   const toggleEraser = () => {
     setIsEraser((v) => !v);
+  };
+
+  /**
+   * Pointer handlers:
+   * - Capture pointer so drawing continues if pointer leaves the canvas bounds.
+   * - Single active pointer id (ignore extra touches).
+   */
+  const handlePointerDown = (e) => {
+    if (e.button != null && e.button !== 0) return; // only primary button for mouse
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Only allow one active pointer (prevents multi-touch scribbles for now).
+    if (activePointerIdRef.current != null && activePointerIdRef.current !== e.pointerId) return;
+
+    const point = getCanvasPointFromEvent(e);
+    if (!point) return;
+
+    // Capture so we keep receiving moves even outside the element.
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+
+    activePointerIdRef.current = e.pointerId;
+    isDrawingRef.current = true;
+    lastPointRef.current = point;
+
+    // A down event should produce a mark even without movement.
+    drawDot(point);
+    e.preventDefault();
+  };
+
+  const handlePointerMove = (e) => {
+    if (!isDrawingRef.current) return;
+    if (activePointerIdRef.current !== e.pointerId) return;
+
+    const point = getCanvasPointFromEvent(e);
+    const last = lastPointRef.current;
+    if (!point || !last) return;
+
+    // Avoid extremely tiny segments.
+    const dx = point.x - last.x;
+    const dy = point.y - last.y;
+    if (dx === 0 && dy === 0) return;
+
+    drawSegment(last, point);
+    lastPointRef.current = point;
+    e.preventDefault();
+  };
+
+  const endStroke = (e) => {
+    if (activePointerIdRef.current != null && e.pointerId !== activePointerIdRef.current) return;
+
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+
+    const canvas = canvasRef.current;
+    if (canvas && activePointerIdRef.current != null) {
+      try {
+        canvas.releasePointerCapture(activePointerIdRef.current);
+      } catch {
+        // ignore
+      }
+    }
+    activePointerIdRef.current = null;
+    e.preventDefault();
   };
 
   return (
@@ -274,7 +482,7 @@ function App() {
               <div className="dsCanvasHeaderLeft">
                 <span className="dsBadge">Canvas</span>
                 <span className="dsCanvasSpec">
-                  {isEraser ? "Eraser" : "Brush"} · {brushSize}px · {isEraser ? "#FFFFFF" : brushColor.toUpperCase()}
+                  {isEraser ? "Eraser" : "Brush"} · {brushSize}px · {isEraser ? "(erase)" : brushColor.toUpperCase()}
                 </span>
               </div>
 
@@ -294,15 +502,12 @@ function App() {
                 className="dsCanvas"
                 aria-label="Drawing canvas"
                 role="img"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={endStroke}
+                onPointerCancel={endStroke}
+                onPointerLeave={endStroke}
               />
-              <div className="dsCanvasOverlay" aria-hidden="true">
-                <div className="dsOverlayCard">
-                  <div className="dsOverlayTitle">Baseline UI ready</div>
-                  <div className="dsOverlayText">
-                    Drawing interactions will be enabled in the next step. Use toolbar controls to preview UI and export a blank canvas.
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </main>
