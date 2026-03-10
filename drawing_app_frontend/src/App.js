@@ -4,17 +4,16 @@ import "./App.css";
 /**
  * Responsive Drawing Studio
  *
- * Step 01.03 scope:
- * - Add undo/redo history for the canvas drawing
- * - Wire undo/redo buttons with correct disabled states
- * - Add keyboard shortcuts: Ctrl/Cmd+Z (undo), Ctrl/Cmd+Shift+Z and/or Ctrl/Cmd+Y (redo)
+ * Step 01.04 scope:
+ * - Ensure clear-canvas is fully implemented and integrated with undo/redo history
+ * - Export/download PNG (dependency-light), with minimal user feedback
  *
  * Implementation notes:
  * - History stores ImageData snapshots in *device pixel* space (canvas.width/height).
  * - A snapshot is committed at the end of each stroke (pointer up/cancel/leave),
  *   and when clearing the canvas.
- * - When undoing/redoing, we restore ImageData and then fill white behind pixels
- *   (destination-over) so export is consistently white-background.
+ * - We fill white behind pixels (destination-over) after restores/resizes/exports
+ *   so export is consistently white-background.
  */
 
 // PUBLIC_INTERFACE
@@ -26,6 +25,9 @@ function App() {
 
   /** Responsive toolbar */
   const [toolbarOpen, setToolbarOpen] = useState(true);
+
+  /** Minimal status/user feedback (kept simple; no toasts/deps). */
+  const [statusText, setStatusText] = useState("");
 
   /**
    * History UI state (derived from refs but kept in state so React can render disabled states).
@@ -59,11 +61,14 @@ function App() {
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < historySize - 1;
 
+  // Prevent actions that would be surprising mid-stroke.
+  const isBusy = isDrawingRef.current;
+
   const activeColor = useMemo(() => (isEraser ? "#ffffff" : brushColor), [isEraser, brushColor]);
 
   /**
    * Fill behind existing pixels: destination-over only affects transparent pixels.
-   * We use this after restores/resize to keep background white for export.
+   * We use this after restores/resize/export to keep background white for PNG.
    */
   const ensureBackgroundWhite = (ctx, cssWidth, cssHeight) => {
     ctx.save();
@@ -71,6 +76,16 @@ function App() {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, cssWidth, cssHeight);
     ctx.restore();
+  };
+
+  /**
+   * Set a short-lived status line (auto clears).
+   * This is intentionally minimal and dependency-free.
+   */
+  const setTransientStatus = (text, ms = 1600) => {
+    setStatusText(text);
+    if (ms <= 0) return;
+    window.setTimeout(() => setStatusText((curr) => (curr === text ? "" : curr)), ms);
   };
 
   /**
@@ -94,9 +109,7 @@ function App() {
   /**
    * Push a new snapshot onto the history stack.
    * - If we are not at the end, truncate redo states.
-   * - Avoid pushing duplicates (cheap pixel-by-pixel check is expensive),
-   *   so we accept an "always push" policy on stroke end; for safety we
-   *   skip if snapshot fails.
+   * - Avoid pushing duplicates (pixel compare is expensive); we commit at stroke end / clear.
    */
   const commitHistorySnapshot = () => {
     const snap = snapshotCanvas();
@@ -174,7 +187,7 @@ function App() {
 
   /**
    * Configure stroke style for the current mode.
-   * For erasing we use `destination-out` so it truly erases (reveals white bg).
+   * For erasing we use `destination-out` so it truly erases.
    */
   const applyStrokeStyle = (ctx) => {
     ctx.lineCap = "round";
@@ -182,7 +195,6 @@ function App() {
     ctx.lineWidth = brushSize;
 
     if (isEraser) {
-      // Erase by clearing pixels rather than painting white; background remains white.
       ctx.globalCompositeOperation = "destination-out";
       ctx.strokeStyle = "rgba(0,0,0,1)";
     } else {
@@ -223,7 +235,6 @@ function App() {
     ctx.beginPath();
     ctx.arc(at.x, at.y, Math.max(0.5, brushSize / 2), 0, Math.PI * 2);
     ctx.fillStyle = isEraser ? "rgba(0,0,0,1)" : brushColor;
-    // For eraser, composite operation is destination-out so fill clears pixels.
     ctx.fill();
     ctx.restore();
   };
@@ -241,7 +252,6 @@ function App() {
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         return { imageData, width: canvas.width, height: canvas.height };
       } catch {
-        // Some environments may throw (e.g., tainted canvas). Not expected here.
         return null;
       }
     };
@@ -250,7 +260,6 @@ function App() {
       const ctx = canvas.getContext("2d");
       if (!ctx || !snap) return;
 
-      // Draw old bitmap scaled into the new canvas (in device pixels).
       const temp = document.createElement("canvas");
       temp.width = snap.width;
       temp.height = snap.height;
@@ -259,13 +268,12 @@ function App() {
       tctx.putImageData(snap.imageData, 0, 0);
 
       ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0); // work in device pixels for drawImage
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(temp, 0, 0, snap.width, snap.height, 0, 0, canvas.width, canvas.height);
       ctx.restore();
 
-      // Re-apply CSS coordinate transform and ensure white background.
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ensureBackgroundWhite(ctx, cssWidth, cssHeight);
     };
@@ -279,7 +287,6 @@ function App() {
       const nextW = Math.floor(cssWidth * dpr);
       const nextH = Math.floor(cssHeight * dpr);
 
-      // Snapshot before resizing (resizing clears the canvas).
       const needsResize = canvas.width !== nextW || canvas.height !== nextH;
       if (needsResize) {
         snapshotRef.current = snapshot();
@@ -290,19 +297,11 @@ function App() {
 
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          // Map drawing coordinates to CSS pixels.
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           restoreSnapshot(snapshotRef.current, dpr, cssWidth, cssHeight);
           snapshotRef.current = null;
         }
-
-        /**
-         * Important: resizing changes the canvas bitmap size; our stored history snapshots
-         * are scaled on restore, so we don't need to rewrite the entire history here.
-         * (We keep history snapshots in their original device pixel size.)
-         */
       } else {
-        // Keep CSS size synced even if device pixels unchanged.
         canvas.style.width = `${cssWidth}px`;
         canvas.style.height = `${cssHeight}px`;
         const ctx = canvas.getContext("2d");
@@ -331,7 +330,6 @@ function App() {
     const apply = () => setToolbarOpen(!mq.matches);
     apply();
 
-    // Support both modern + older browsers.
     if (mq.addEventListener) mq.addEventListener("change", apply);
     else mq.addListener(apply);
 
@@ -347,7 +345,6 @@ function App() {
    */
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
-      // Only initialize once
       if (historyRef.current.length > 0) return;
       commitHistorySnapshot();
     });
@@ -357,6 +354,8 @@ function App() {
 
   // PUBLIC_INTERFACE
   const handleClear = () => {
+    /** This is a public function. */
+    if (isDrawingRef.current) return; // don't clear mid-stroke
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -371,30 +370,82 @@ function App() {
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    // Fill white so export looks clean.
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
     commitHistorySnapshot();
+    setTransientStatus("Canvas cleared");
+  };
+
+  /**
+   * Download helper: create an <a download> with a temporary object URL.
+   * We revoke the URL after click to avoid leaking memory.
+   */
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   // PUBLIC_INTERFACE
   const handleExport = () => {
+    /** This is a public function. */
+    if (isDrawingRef.current) return; // avoid exporting half-committed stroke
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Export as PNG. Background is filled white.
-    const dataUrl = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `drawing-${new Date().toISOString().replaceAll(":", "-")}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    // Ensure white background behind pixels for PNG.
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const rect = canvas.getBoundingClientRect();
+      const cssWidth = Math.max(1, Math.floor(rect.width));
+      const cssHeight = Math.max(1, Math.floor(rect.height));
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ensureBackgroundWhite(ctx, cssWidth, cssHeight);
+    }
+
+    const filename = `drawing-${new Date().toISOString().replaceAll(":", "-")}.png`;
+
+    if (canvas.toBlob) {
+      setTransientStatus("Preparing PNG…", 1200);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            setTransientStatus("Export failed", 1800);
+            return;
+          }
+          downloadBlob(blob, filename);
+          setTransientStatus("PNG downloaded");
+        },
+        "image/png",
+        1.0
+      );
+      return;
+    }
+
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTransientStatus("PNG downloaded");
+    } catch {
+      setTransientStatus("Export failed", 1800);
+    }
   };
 
   // PUBLIC_INTERFACE
   const handleUndo = () => {
+    /** This is a public function. */
     if (historyIndexRef.current <= 0) return;
     const nextIndex = historyIndexRef.current - 1;
     historyIndexRef.current = nextIndex;
@@ -408,6 +459,7 @@ function App() {
 
   // PUBLIC_INTERFACE
   const handleRedo = () => {
+    /** This is a public function. */
     if (historyIndexRef.current >= historyRef.current.length - 1) return;
     const nextIndex = historyIndexRef.current + 1;
     historyIndexRef.current = nextIndex;
@@ -421,6 +473,7 @@ function App() {
 
   // PUBLIC_INTERFACE
   const toggleEraser = () => {
+    /** This is a public function. */
     setIsEraser((v) => !v);
   };
 
@@ -448,7 +501,6 @@ function App() {
 
       if (isEditableTarget(e.target)) return;
 
-      // Undo: Mod+Z (without Shift)
       if (key === "z" && !e.shiftKey) {
         if (historyIndexRef.current > 0) {
           e.preventDefault();
@@ -457,7 +509,6 @@ function App() {
         return;
       }
 
-      // Redo: Mod+Shift+Z OR Mod+Y
       if ((key === "z" && e.shiftKey) || key === "y") {
         if (historyIndexRef.current < historyRef.current.length - 1) {
           e.preventDefault();
@@ -482,13 +533,11 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Only allow one active pointer (prevents multi-touch scribbles for now).
     if (activePointerIdRef.current != null && activePointerIdRef.current !== e.pointerId) return;
 
     const point = getCanvasPointFromEvent(e);
     if (!point) return;
 
-    // Capture so we keep receiving moves even outside the element.
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
@@ -499,7 +548,6 @@ function App() {
     isDrawingRef.current = true;
     lastPointRef.current = point;
 
-    // A down event should produce a mark even without movement.
     drawDot(point);
     e.preventDefault();
   };
@@ -512,7 +560,6 @@ function App() {
     const last = lastPointRef.current;
     if (!point || !last) return;
 
-    // Avoid extremely tiny segments.
     const dx = point.x - last.x;
     const dy = point.y - last.y;
     if (dx === 0 && dy === 0) return;
@@ -540,7 +587,6 @@ function App() {
     }
     activePointerIdRef.current = null;
 
-    // Commit a snapshot only if we were actually drawing.
     if (wasDrawing) {
       commitHistorySnapshot();
     }
@@ -633,10 +679,10 @@ function App() {
             <div className="dsSectionTitle">History</div>
 
             <div className="dsInline dsInlineWrap">
-              <button type="button" className="dsBtn dsBtnGhost" onClick={handleUndo} disabled={!canUndo}>
+              <button type="button" className="dsBtn dsBtnGhost" onClick={handleUndo} disabled={!canUndo || isBusy}>
                 Undo
               </button>
-              <button type="button" className="dsBtn dsBtnGhost" onClick={handleRedo} disabled={!canRedo}>
+              <button type="button" className="dsBtn dsBtnGhost" onClick={handleRedo} disabled={!canRedo || isBusy}>
                 Redo
               </button>
             </div>
@@ -656,16 +702,23 @@ function App() {
             <div className="dsSectionTitle">Canvas</div>
 
             <div className="dsInline dsInlineWrap">
-              <button type="button" className="dsBtn dsBtnDanger" onClick={handleClear}>
+              <button type="button" className="dsBtn dsBtnDanger" onClick={handleClear} disabled={isBusy}>
                 Clear
               </button>
-              <button type="button" className="dsBtn dsBtnPrimary" onClick={handleExport}>
+              <button type="button" className="dsBtn dsBtnPrimary" onClick={handleExport} disabled={isBusy}>
                 Export PNG
               </button>
             </div>
 
             <div className="dsMeta">
-              Tip: On mobile, use the <strong>Tools</strong> button to show/hide the toolbar.
+              <span className="dsMetaDot" aria-hidden="true" />
+              {statusText ? (
+                <span aria-live="polite">{statusText}</span>
+              ) : (
+                <>
+                  Tip: On mobile, use the <strong>Tools</strong> button to show/hide the toolbar.
+                </>
+              )}
             </div>
           </div>
         </aside>
@@ -681,16 +734,16 @@ function App() {
               </div>
 
               <div className="dsCanvasHeaderRight">
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleUndo} disabled={!canUndo}>
+                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleUndo} disabled={!canUndo || isBusy}>
                   Undo
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleRedo} disabled={!canRedo}>
+                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleRedo} disabled={!canRedo || isBusy}>
                   Redo
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleClear}>
+                <button type="button" className="dsBtn dsBtnSmall dsBtnGhost" onClick={handleClear} disabled={isBusy}>
                   Clear
                 </button>
-                <button type="button" className="dsBtn dsBtnSmall dsBtnPrimary" onClick={handleExport}>
+                <button type="button" className="dsBtn dsBtnSmall dsBtnPrimary" onClick={handleExport} disabled={isBusy}>
                   Export
                 </button>
               </div>
