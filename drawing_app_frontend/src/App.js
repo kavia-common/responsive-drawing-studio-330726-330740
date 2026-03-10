@@ -67,6 +67,44 @@ function App() {
   const activeColor = useMemo(() => (isEraser ? "#ffffff" : brushColor), [isEraser, brushColor]);
 
   /**
+   * Preset palette:
+   * - These are quick-pick swatches that set the same brushColor state as the native color input.
+   * - The native <input type="color"> remains available and unchanged for custom color selection.
+   */
+  const presetColors = useMemo(
+    () => [
+      // Neutrals
+      { name: "Black", value: "#111827" },
+      { name: "Slate", value: "#334155" },
+      { name: "Gray", value: "#6b7280" },
+      { name: "White", value: "#ffffff" },
+
+      // Primary/brand-ish
+      { name: "Blue", value: "#3b82f6" },
+      { name: "Cyan", value: "#06b6d4" },
+      { name: "Indigo", value: "#6366f1" },
+      { name: "Purple", value: "#a855f7" },
+      { name: "Pink", value: "#ec4899" },
+
+      // Warm
+      { name: "Red", value: "#ef4444" },
+      { name: "Orange", value: "#f97316" },
+      { name: "Amber", value: "#f59e0b" },
+      { name: "Yellow", value: "#eab308" },
+
+      // Greens
+      { name: "Lime", value: "#84cc16" },
+      { name: "Green", value: "#22c55e" },
+      { name: "Emerald", value: "#10b981" },
+
+      // Accents
+      { name: "Teal", value: "#14b8a6" },
+      { name: "Sky", value: "#0ea5e9" },
+    ],
+    []
+  );
+
+  /**
    * Fill behind existing pixels: destination-over only affects transparent pixels.
    * We use this after restores/resize/export to keep background white for PNG.
    */
@@ -655,6 +693,34 @@ function App() {
                 />
                 <span className="dsSwatch" style={{ background: activeColor }} aria-label="Active color swatch" />
                 <span className="dsHint">{isEraser ? "Eraser active" : brushColor.toUpperCase()}</span>
+              </div>
+
+              <div className="dsPresetRow" role="group" aria-label="Preset colors">
+                {presetColors.map((c) => {
+                  const isSelected = !isEraser && brushColor.toLowerCase() === c.value.toLowerCase();
+                  return (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className={`dsPreset ${isSelected ? "isSelected" : ""}`}
+                      onClick={() => {
+                        // If the user picks a color, it’s reasonable to exit eraser mode.
+                        setIsEraser(false);
+                        setBrushColor(c.value);
+                      }}
+                      title={c.name}
+                      aria-label={`Set brush color to ${c.name} (${c.value.toUpperCase()})`}
+                      aria-pressed={isSelected}
+                      disabled={isBusy}
+                    >
+                      <span className="dsPresetDot" style={{ background: c.value }} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="dsHint" style={{ marginTop: 2 }}>
+                Tip: Use presets for quick picks, or the color picker for any custom color.
               </div>
             </label>
 
