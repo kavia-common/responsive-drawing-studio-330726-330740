@@ -588,25 +588,22 @@ function App() {
   };
 
   /**
-   * Keyboard shortcuts:
+   * Keyboard shortcuts (user-specified mappings):
    * History:
    * - Ctrl/Cmd + Z => undo
    * - Ctrl/Cmd + Shift + Z => redo
    * - Ctrl/Cmd + Y => redo
    *
-   * Favorites:
+   * Color favorites:
    * - Ctrl/Cmd + S => save current brush color to Favorites
    *
    * Tools / canvas:
    * - E => toggle eraser
-   * - Ctrl/Cmd + E => toggle eraser (helps when focus is not on canvas)
-   * - Delete / Backspace => clear canvas
-   * - Ctrl/Cmd + K => clear canvas
-   * - Ctrl/Cmd + P => export PNG
+   * - Ctrl/Cmd + Backspace => clear canvas
+   * - Ctrl/Cmd + Shift + S => export PNG
    *
    * Brush size:
    * - [ / ] => size down / up
-   * - - / + => size down / up
    * - 0 => reset size (12px)
    *
    * Guardrails:
@@ -667,22 +664,14 @@ function App() {
           return;
         }
 
-        // Clear canvas with Delete / Backspace.
-        if (key === "delete" || key === "backspace") {
-          e.preventDefault();
-          safeClear();
-          return;
-        }
-
         // Brush size
-        if (key === "[" || key === "-") {
+        if (key === "[") {
           e.preventDefault();
           adjustBrushSize(-1);
           return;
         }
 
-        if (key === "]" || key === "=" || key === "+") {
-          // Note: "+" is typically Shift+"="; many browsers report "=" when shift is held.
+        if (key === "]") {
           e.preventDefault();
           adjustBrushSize(1);
           return;
@@ -714,33 +703,27 @@ function App() {
         return;
       }
 
-      // Save current brush color to Favorites.
-      // We preventDefault so the browser doesn't trigger "Save page" dialog.
+      // Export PNG (Ctrl/Cmd+Shift+S).
+      // PreventDefault to avoid browser "Save page as..." in some browsers.
+      if (key === "s" && e.shiftKey) {
+        e.preventDefault();
+        safeExport();
+        return;
+      }
+
+      // Save current brush color to Favorites (Ctrl/Cmd+S).
+      // PreventDefault so the browser doesn't trigger "Save page" dialog.
       if (key === "s") {
         e.preventDefault();
         handleSaveCurrentColorToFavorites();
         return;
       }
 
-      // Toggle eraser (Ctrl/Cmd+E normally focuses the browser search bar in some browsers;
-      // but in many apps it's "Eraser", so we provide it and preventDefault to avoid browser behavior).
-      if (key === "e") {
-        e.preventDefault();
-        safeToggleEraser();
-        return;
-      }
-
-      // Clear canvas (Ctrl/Cmd+K is a common "clear" mnemonic, and many browsers use it for address bar)
-      if (key === "k") {
+      // Clear canvas (Ctrl/Cmd+Backspace).
+      if (key === "backspace") {
         e.preventDefault();
         safeClear();
         return;
-      }
-
-      // Export PNG (Ctrl/Cmd+P normally prints; we intercept to export as requested).
-      if (key === "p") {
-        e.preventDefault();
-        safeExport();
       }
     };
 
@@ -868,7 +851,7 @@ function App() {
                 </span>
               </div>
               <div className="dsHint" style={{ marginTop: 4 }}>
-                Shortcuts: [ / ] (or - / +) adjust size · 0 resets
+                Shortcuts: [ / ] adjust size · 0 resets
               </div>
             </label>
 
@@ -1042,7 +1025,7 @@ function App() {
                 className="dsBtn dsBtnDanger"
                 onClick={handleClear}
                 disabled={isBusy}
-                title="Clear canvas (Delete)"
+                title="Clear canvas (Ctrl/Cmd+Backspace)"
               >
                 Clear
               </button>
@@ -1051,7 +1034,7 @@ function App() {
                 className="dsBtn dsBtnPrimary"
                 onClick={handleExport}
                 disabled={isBusy}
-                title="Export PNG (Ctrl/Cmd+P)"
+                title="Export PNG (Ctrl/Cmd+Shift+S)"
               >
                 Export PNG
               </button>
@@ -1063,7 +1046,8 @@ function App() {
                 <span aria-live="polite">{statusText}</span>
               ) : (
                 <>
-                  Tip: E toggles eraser · Delete clears · Ctrl/Cmd+P exports PNG · On mobile use <strong>Tools</strong>.
+                  Tip: E toggles eraser · Ctrl/Cmd+Backspace clears · Ctrl/Cmd+Shift+S exports PNG · On mobile use{" "}
+                  <strong>Tools</strong>.
                 </>
               )}
             </div>
@@ -1105,7 +1089,7 @@ function App() {
                   onClick={handleClear}
                   disabled={isBusy}
                   aria-label="Clear canvas (header)"
-                  title="Clear canvas (Delete)"
+                  title="Clear canvas (Ctrl/Cmd+Backspace)"
                 >
                   Clear
                 </button>
@@ -1115,7 +1099,7 @@ function App() {
                   onClick={handleExport}
                   disabled={isBusy}
                   aria-label="Export PNG (header)"
-                  title="Export PNG (Ctrl/Cmd+P)"
+                  title="Export PNG (Ctrl/Cmd+Shift+S)"
                 >
                   Export
                 </button>

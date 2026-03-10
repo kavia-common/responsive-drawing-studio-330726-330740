@@ -260,16 +260,16 @@ describe("Responsive Drawing Studio core UI", () => {
     expect(await screen.findByText(/Brush · 12px/i)).toBeInTheDocument();
   });
 
-  test("keyboard shortcut: Delete clears the canvas and announces status", async () => {
+  test("keyboard shortcut: Ctrl/Cmd+Backspace clears the canvas and announces status", async () => {
     render(<App />);
 
-    fireEvent.keyDown(window, { key: "Delete" });
+    fireEvent.keyDown(window, { key: "Backspace", ctrlKey: true });
 
     const statuses = screen.getAllByRole("status");
     expect(statuses.map((n) => n.textContent).join(" ")).toMatch(/Canvas cleared/i);
   });
 
-  test("keyboard shortcut: Ctrl/Cmd+P exports PNG (intercepts print) and creates a download link", async () => {
+  test("keyboard shortcut: Ctrl/Cmd+Shift+S exports PNG and creates a download link", async () => {
     const createElementSpy = jest.spyOn(document, "createElement");
     let lastAnchor = null;
 
@@ -285,7 +285,7 @@ describe("Responsive Drawing Studio core UI", () => {
 
     render(<App />);
 
-    fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true, shiftKey: true });
 
     await waitFor(() => {
       expect(lastAnchor).not.toBeNull();
